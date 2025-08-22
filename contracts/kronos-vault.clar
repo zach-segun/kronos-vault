@@ -70,3 +70,78 @@
   { asset: (string-ascii 3) }
   { price: uint }
 )
+
+;; Private Functions
+(define-private (calculate-collateral-ratio
+    (collateral uint)
+    (loan uint)
+    (btc-price uint)
+  )
+  (let (
+      (collateral-value (* collateral btc-price))
+      (ratio (* (/ collateral-value loan) u100))
+    )
+    ratio
+  )
+)
+
+(define-private (calculate-interest
+    (principal uint)
+    (rate uint)
+    (blocks uint)
+  )
+  (let (
+      (interest-per-block (/ (* principal rate) (* u100 u144))) ;; Daily interest
+      (total-interest (* interest-per-block blocks))
+    )
+    total-interest
+  )
+)
+
+(define-private (check-liquidation (loan-id uint))
+  (let (
+      (loan (unwrap! (map-get? loans { loan-id: loan-id }) ERR-LOAN-NOT-FOUND))
+      (btc-price (unwrap! (get price (map-get? collateral-prices { asset: "BTC" }))
+        ERR-NOT-INITIALIZED
+      ))
+      (current-ratio (calculate-collateral-ratio (get collateral-amount loan)
+        (get loan-amount loan) btc-price
+      ))
+    )
+    (if (<= current-ratio (var-get liquidation-threshold))
+      (liquidate-position loan-id)
+      (ok true)
+    )
+  )
+)
+
+(define-private (liquidate-position (loan-id uint))
+  (let (
+      (loan (unwrap! (map-get? loans { loan-id: loan-id }) ERR-LOAN-NOT-FOUND))
+      (borrower (get borrower loan))
+    )
+    (begin
+      (map-set loans { loan-id: loan-id } (merge loan { status: "liquidated" }))
+      (map-delete user-loans { user: borrower })
+      (ok true)
+    )
+  )
+)
+
+(define-private (validate-loan-id (loan-id uint))
+  (and
+    (> loan-id u0)
+    (<= loan-id (var-get total-loans-issued))
+  )
+)
+
+(define-private (is-valid-asset (asset (string-ascii 3)))
+  (is-some (index-of VALID-ASSETS asset))
+)
+
+(define-private (is-valid-price (price uint))
+  (and
+    (> price u0)
+    (<= price u1000000000000)
+  )
+)
